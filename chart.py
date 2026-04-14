@@ -1,6 +1,5 @@
 import os
-from datetime import datetime
-from openai import OpenAI
+
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
@@ -36,6 +35,7 @@ def generate_ai_analysis(category_totals, total_income, total_expense, period_la
 語氣親切、口語化，適合在聊天軟體中閱讀。使用 emoji 讓內容更生動。"""
 
     try:
+        from openai import OpenAI
         client = OpenAI(api_key=OPENAI_API_KEY)
         response = client.chat.completions.create(
             model="gpt-4o-mini",
