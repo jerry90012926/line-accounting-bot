@@ -110,22 +110,36 @@ def handle_categories():
 
 
 def handle_expense(user_id, text):
-    # 格式: 描述 金額 [分類]
-    # 例: 早餐 50  /  午餐 120 飲食
+    # 支援格式:
+    # 早餐 50  /  午餐 120 飲食  /  早餐50  /  午餐120飲食
     parts = text.split()
-    if len(parts) < 2:
-        return {"text": "❓ 格式不正確\n請輸入：品項 金額\n例如：早餐 50"}
 
-    description = parts[0]
-    try:
-        amount = float(parts[1])
-    except ValueError:
-        return {"text": "❓ 金額格式錯誤\n請輸入數字，例如：早餐 50"}
+    if len(parts) >= 2:
+        # 有空格: "早餐 50" 或 "午餐 120 飲食"
+        description = parts[0]
+        try:
+            amount = float(parts[1])
+        except ValueError:
+            return {"text": "❓ 金額格式錯誤\n請輸入數字，例如：早餐 50"}
+        category = parts[2] if len(parts) >= 3 and parts[2] in CATEGORIES else None
+    else:
+        # 沒空格: "早餐50" 或 "午餐120飲食"
+        match = re.match(r"^(.+?)([\d.]+)(.*)$", text)
+        if not match:
+            return {"text": "❓ 格式不正確\n請輸入：品項 金額\n例如：早餐 50 或 早餐50"}
+        description = match.group(1)
+        try:
+            amount = float(match.group(2))
+        except ValueError:
+            return {"text": "❓ 金額格式錯誤\n請輸入數字，例如：早餐 50"}
+        suffix = match.group(3).strip()
+        category = suffix if suffix in CATEGORIES else None
 
     if amount <= 0:
         return {"text": "❓ 金額必須大於 0"}
 
-    category = parts[2] if len(parts) >= 3 and parts[2] in CATEGORIES else guess_category(description)
+    if category is None:
+        category = guess_category(description)
 
     session = get_session()
     try:
