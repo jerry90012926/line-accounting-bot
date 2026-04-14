@@ -1,7 +1,10 @@
+import os
 import re
 from datetime import datetime, timedelta
 from models import get_session, Record
 from chart import generate_expense_chart
+
+BASE_URL = os.getenv("RENDER_EXTERNAL_URL", "https://chi-line-bot.onrender.com")
 
 # 預設分類
 CATEGORIES = ["飲食", "交通", "娛樂", "購物", "居住", "醫療", "教育", "其他"]
@@ -330,9 +333,10 @@ def handle_chart(user_id):
     for r in records:
         category_totals[r.category] = category_totals.get(r.category, 0) + r.amount
 
-    image_url = generate_expense_chart(category_totals, now.strftime("%Y年%m月"))
+    filename = generate_expense_chart(category_totals, now.strftime("%Y年%m月"))
 
-    if image_url:
+    if filename:
+        image_url = f"{BASE_URL}/static/charts/{filename}"
         total = sum(category_totals.values())
         return {
             "text": f"📊 {now.strftime('%Y年%m月')}支出圖表\n總支出：${total:,.0f}",

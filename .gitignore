@@ -3,5 +3,4 @@ __pycache__/
 *.db
 .env
 venv/
-*.png
-*.jpg
+static/charts/

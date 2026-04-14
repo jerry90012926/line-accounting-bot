@@ -1,4 +1,5 @@
-from flask import Flask, request, abort
+import os
+from flask import Flask, request, abort, send_from_directory
 from linebot.v3 import WebhookHandler
 from linebot.v3.messaging import (
     Configuration,
@@ -17,11 +18,18 @@ from handlers import handle_text_message
 
 app = Flask(__name__)
 
-# 初始化資料庫（確保 gunicorn 啟動時也會執行）
+# 圖片目錄
+CHART_DIR = os.path.join(os.path.dirname(__file__), "static", "charts")
+os.makedirs(CHART_DIR, exist_ok=True)
+
+# 初始化資料庫
 init_db()
 
 configuration = Configuration(access_token=LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
+
+# Render 的公開 URL
+BASE_URL = os.getenv("RENDER_EXTERNAL_URL", "https://chi-line-bot.onrender.com")
 
 
 @app.route("/callback", methods=["POST"])
@@ -40,6 +48,11 @@ def callback():
 @app.route("/", methods=["GET"])
 def health():
     return "LINE BOT is running!"
+
+
+@app.route("/static/charts/<filename>")
+def serve_chart(filename):
+    return send_from_directory(CHART_DIR, filename)
 
 
 @handler.add(MessageEvent, message=TextMessageContent)

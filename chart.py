@@ -1,12 +1,16 @@
 import io
-import requests
+import os
+import uuid
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib import font_manager
-from config import IMGUR_CLIENT_ID
 
-# 嘗試使用中文字體
+# 圖片儲存目錄
+CHART_DIR = os.path.join(os.path.dirname(__file__), "static", "charts")
+os.makedirs(CHART_DIR, exist_ok=True)
+
+
 def _get_chinese_font():
     """嘗試找到系統中的中文字體"""
     chinese_fonts = [
@@ -41,20 +45,11 @@ CATEGORY_COLORS = {
 
 def generate_expense_chart(category_totals, title):
     """
-    生成支出圓餅圖並上傳到 Imgur，回傳圖片 URL。
-    若沒有設定 Imgur Client ID，則回傳 None。
+    生成支出圓餅圖，儲存到 static/charts/，回傳檔名。
     """
-    if not IMGUR_CLIENT_ID:
-        return None
-
     categories = list(category_totals.keys())
     amounts = list(category_totals.values())
     colors = [CATEGORY_COLORS.get(c, "#AEB6BF") for c in categories]
-
-    # 設定字體
-    font_props = {}
-    if CHINESE_FONT:
-        font_props["fontproperties"] = font_manager.FontProperties(family=CHINESE_FONT)
 
     fig, ax = plt.subplots(figsize=(8, 6))
     fig.patch.set_facecolor("#FFFFFF")
@@ -76,7 +71,7 @@ def generate_expense_chart(category_totals, title):
     # 圖例
     legend_labels = [f"{cat}  ${amt:,.0f}" for cat, amt in zip(categories, amounts)]
     if CHINESE_FONT:
-        legend = ax.legend(
+        ax.legend(
             wedges,
             legend_labels,
             loc="center left",
@@ -85,7 +80,7 @@ def generate_expense_chart(category_totals, title):
             prop=font_manager.FontProperties(family=CHINESE_FONT, size=11),
         )
     else:
-        legend = ax.legend(
+        ax.legend(
             wedges,
             legend_labels,
             loc="center left",
@@ -112,24 +107,10 @@ def generate_expense_chart(category_totals, title):
 
     plt.tight_layout()
 
-    # 儲存到記憶體
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    # 儲存到 static/charts/
+    filename = f"{uuid.uuid4().hex}.png"
+    filepath = os.path.join(CHART_DIR, filename)
+    fig.savefig(filepath, format="png", dpi=150, bbox_inches="tight")
     plt.close(fig)
-    buf.seek(0)
 
-    # 上傳到 Imgur
-    try:
-        response = requests.post(
-            "https://api.imgur.com/3/image",
-            headers={"Authorization": f"Client-ID {IMGUR_CLIENT_ID}"},
-            files={"image": ("chart.png", buf, "image/png")},
-            timeout=15,
-        )
-        if response.status_code == 200:
-            data = response.json()
-            return data["data"]["link"]
-    except requests.RequestException:
-        pass
-
-    return None
+    return filename
