@@ -1,0 +1,135 @@
+import io
+import requests
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from matplotlib import font_manager
+from config import IMGUR_CLIENT_ID
+
+# 嘗試使用中文字體
+def _get_chinese_font():
+    """嘗試找到系統中的中文字體"""
+    chinese_fonts = [
+        "Microsoft JhengHei",  # Windows 正黑體
+        "Microsoft YaHei",     # Windows 微軟雅黑
+        "SimHei",              # Windows 黑體
+        "PingFang TC",         # macOS
+        "Noto Sans CJK TC",   # Linux
+        "WenQuanYi Micro Hei", # Linux
+    ]
+    available = {f.name for f in font_manager.fontManager.ttflist}
+    for font_name in chinese_fonts:
+        if font_name in available:
+            return font_name
+    return None
+
+
+CHINESE_FONT = _get_chinese_font()
+
+# 分類顏色
+CATEGORY_COLORS = {
+    "飲食": "#FF6B6B",
+    "交通": "#4ECDC4",
+    "娛樂": "#45B7D1",
+    "購物": "#FFA07A",
+    "居住": "#98D8C8",
+    "醫療": "#F7DC6F",
+    "教育": "#BB8FCE",
+    "其他": "#AEB6BF",
+}
+
+
+def generate_expense_chart(category_totals, title):
+    """
+    生成支出圓餅圖並上傳到 Imgur，回傳圖片 URL。
+    若沒有設定 Imgur Client ID，則回傳 None。
+    """
+    if not IMGUR_CLIENT_ID:
+        return None
+
+    categories = list(category_totals.keys())
+    amounts = list(category_totals.values())
+    colors = [CATEGORY_COLORS.get(c, "#AEB6BF") for c in categories]
+
+    # 設定字體
+    font_props = {}
+    if CHINESE_FONT:
+        font_props["fontproperties"] = font_manager.FontProperties(family=CHINESE_FONT)
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    fig.patch.set_facecolor("#FFFFFF")
+
+    wedges, texts, autotexts = ax.pie(
+        amounts,
+        labels=None,
+        autopct="%1.0f%%",
+        colors=colors,
+        startangle=90,
+        pctdistance=0.8,
+        wedgeprops={"edgecolor": "white", "linewidth": 2},
+    )
+
+    for autotext in autotexts:
+        autotext.set_fontsize(11)
+        autotext.set_fontweight("bold")
+
+    # 圖例
+    legend_labels = [f"{cat}  ${amt:,.0f}" for cat, amt in zip(categories, amounts)]
+    if CHINESE_FONT:
+        legend = ax.legend(
+            wedges,
+            legend_labels,
+            loc="center left",
+            bbox_to_anchor=(1, 0.5),
+            fontsize=11,
+            prop=font_manager.FontProperties(family=CHINESE_FONT, size=11),
+        )
+    else:
+        legend = ax.legend(
+            wedges,
+            legend_labels,
+            loc="center left",
+            bbox_to_anchor=(1, 0.5),
+            fontsize=11,
+        )
+
+    total = sum(amounts)
+    if CHINESE_FONT:
+        ax.set_title(
+            f"{title} 支出分析\n總計 ${total:,.0f}",
+            fontsize=16,
+            fontweight="bold",
+            pad=20,
+            fontproperties=font_manager.FontProperties(family=CHINESE_FONT, size=16),
+        )
+    else:
+        ax.set_title(
+            f"{title} Expense\nTotal ${total:,.0f}",
+            fontsize=16,
+            fontweight="bold",
+            pad=20,
+        )
+
+    plt.tight_layout()
+
+    # 儲存到記憶體
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+
+    # 上傳到 Imgur
+    try:
+        response = requests.post(
+            "https://api.imgur.com/3/image",
+            headers={"Authorization": f"Client-ID {IMGUR_CLIENT_ID}"},
+            files={"image": ("chart.png", buf, "image/png")},
+            timeout=15,
+        )
+        if response.status_code == 200:
+            data = response.json()
+            return data["data"]["link"]
+    except requests.RequestException:
+        pass
+
+    return None
