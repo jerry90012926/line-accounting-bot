@@ -7,7 +7,7 @@ from linebot.v3.messaging import (
     ReplyMessageRequest,
     TextMessage,
 )
-from linebot.v3.webhooks import MessageEvent, TextMessageContent
+from linebot.v3.webhooks import MessageEvent, TextMessageContent, FollowEvent
 from linebot.v3.exceptions import InvalidSignatureError
 
 from config import LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN
@@ -42,6 +42,33 @@ def callback():
 @app.route("/", methods=["GET"])
 def health():
     return "LINE BOT is running!"
+
+
+@handler.add(FollowEvent)
+def on_follow(event):
+    welcome_text = (
+        "👋 歡迎使用記帳機器人！\n"
+        "━━━━━━━━━━━━━━━\n"
+        "我可以幫你快速記錄每日收支\n\n"
+        "【快速開始】\n"
+        "  📝 記支出：早餐 50\n"
+        "  📝 也可以：早餐50\n"
+        "  💵 記收入：收入 薪水 50000\n\n"
+        "【查詢統計】\n"
+        "  今日 / 本週 / 本月\n\n"
+        "【AI 分析】\n"
+        "  輸入「分析」查看消費報告\n\n"
+        "輸入「說明」查看完整指令 📖"
+    )
+
+    with ApiClient(configuration) as api_client:
+        line_bot_api = MessagingApi(api_client)
+        line_bot_api.reply_message(
+            ReplyMessageRequest(
+                reply_token=event.reply_token,
+                messages=[TextMessage(text=welcome_text)],
+            )
+        )
 
 
 @handler.add(MessageEvent, message=TextMessageContent)
