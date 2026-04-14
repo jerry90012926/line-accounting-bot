@@ -1,10 +1,7 @@
-import os
 import re
 from datetime import datetime, timedelta
 from models import get_session, Record
-from chart import generate_expense_chart
-
-BASE_URL = os.getenv("RENDER_EXTERNAL_URL", "https://chi-line-bot.onrender.com")
+from chart import generate_ai_analysis
 
 # 預設分類
 CATEGORIES = ["飲食", "交通", "娛樂", "購物", "居住", "醫療", "教育", "其他"]
@@ -65,7 +62,7 @@ def handle_text_message(user_id, text):
         return handle_week(user_id)
     if text == "本月":
         return handle_month(user_id)
-    if text in ("圖表", "報表"):
+    if text in ("圖表", "報表", "分析"):
         return handle_chart(user_id)
     if text.startswith("刪除"):
         return handle_delete(user_id, text)
@@ -94,8 +91,8 @@ def handle_help():
         "  本週 → 本週統計\n"
         "  本月 → 本月統計\n"
         "\n"
-        "【圖表】\n"
-        "  圖表 → 本月支出圓餅圖\n"
+        "【AI 分析】\n"
+        "  分析 → AI 分析本月消費\n"
         "\n"
         "【其他】\n"
         "  刪除 #編號 → 刪除記錄\n"
@@ -317,7 +314,6 @@ def handle_chart(user_id):
             session.query(Record)
             .filter(
                 Record.user_id == user_id,
-                Record.type == "expense",
                 Record.created_at >= start,
                 Record.created_at < end,
             )
@@ -327,20 +323,17 @@ def handle_chart(user_id):
         session.close()
 
     if not records:
-        return {"text": "📭 本月還沒有支出記錄，無法產生圖表"}
+        return {"text": "📭 本月還沒有任何記錄，無法分析"}
+
+    total_expense = sum(r.amount for r in records if r.type == "expense")
+    total_income = sum(r.amount for r in records if r.type == "income")
 
     category_totals = {}
     for r in records:
-        category_totals[r.category] = category_totals.get(r.category, 0) + r.amount
+        if r.type == "expense":
+            category_totals[r.category] = category_totals.get(r.category, 0) + r.amount
 
-    filename = generate_expense_chart(category_totals, now.strftime("%Y年%m月"))
+    period_label = now.strftime("%Y年%m月")
+    analysis = generate_ai_analysis(category_totals, total_income, total_expense, period_label)
 
-    if filename:
-        image_url = f"{BASE_URL}/static/charts/{filename}"
-        total = sum(category_totals.values())
-        return {
-            "text": f"📊 {now.strftime('%Y年%m月')}支出圖表\n總支出：${total:,.0f}",
-            "image_url": image_url,
-        }
-    else:
-        return {"text": "❌ 圖表產生失敗，請稍後再試"}
+    return {"text": analysis}

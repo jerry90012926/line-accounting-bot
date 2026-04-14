@@ -1,5 +1,4 @@
-import os
-from flask import Flask, request, abort, send_from_directory
+from flask import Flask, request, abort
 from linebot.v3 import WebhookHandler
 from linebot.v3.messaging import (
     Configuration,
@@ -7,7 +6,6 @@ from linebot.v3.messaging import (
     MessagingApi,
     ReplyMessageRequest,
     TextMessage,
-    ImageMessage,
 )
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 from linebot.v3.exceptions import InvalidSignatureError
@@ -18,18 +16,11 @@ from handlers import handle_text_message
 
 app = Flask(__name__)
 
-# 圖片目錄
-CHART_DIR = os.path.join(os.path.dirname(__file__), "static", "charts")
-os.makedirs(CHART_DIR, exist_ok=True)
-
 # 初始化資料庫
 init_db()
 
 configuration = Configuration(access_token=LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
-
-# Render 的公開 URL
-BASE_URL = os.getenv("RENDER_EXTERNAL_URL", "https://chi-line-bot.onrender.com")
 
 
 @app.route("/callback", methods=["POST"])
@@ -50,11 +41,6 @@ def health():
     return "LINE BOT is running!"
 
 
-@app.route("/static/charts/<filename>")
-def serve_chart(filename):
-    return send_from_directory(CHART_DIR, filename)
-
-
 @handler.add(MessageEvent, message=TextMessageContent)
 def on_message(event):
     user_id = event.source.user_id
@@ -68,13 +54,6 @@ def on_message(event):
         messages = []
         if result.get("text"):
             messages.append(TextMessage(text=result["text"]))
-        if result.get("image_url"):
-            messages.append(
-                ImageMessage(
-                    original_content_url=result["image_url"],
-                    preview_image_url=result["image_url"],
-                )
-            )
 
         if messages:
             line_bot_api.reply_message(
