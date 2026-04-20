@@ -1,5 +1,6 @@
-flask==3.1.0
-line-bot-sdk==3.11.0
-SQLAlchemy==2.0.36
+discord.py==2.4.0
 python-dotenv==1.0.1
-gunicorn==23.0.0
+SQLAlchemy==2.0.36
+yfinance==0.2.50
+requests==2.32.3
+flask==3.1.0

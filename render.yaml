@@ -1,15 +1,11 @@
 services:
   - type: web
-    name: line-accounting-bot
+    name: discord-stock-bot
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
+    startCommand: python app.py
     envVars:
-      - key: LINE_CHANNEL_SECRET
+      - key: DISCORD_BOT_TOKEN
         sync: false
-      - key: LINE_CHANNEL_ACCESS_TOKEN
+      - key: DISCORD_GUILD_ID
         sync: false
-      - key: IMGUR_CLIENT_ID
-        sync: false
-      - key: PYTHON_VERSION
-        value: "3.12"
