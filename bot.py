@@ -44,7 +44,35 @@ bot.tree.interaction_check = _owner_check
 @bot.event
 async def on_ready():
     print(f"✅ Discord Bot 已登入: {bot.user} (id={bot.user.id})")
+    print(f"📍 加入的 servers ({len(bot.guilds)}):")
+    for g in bot.guilds:
+        print(f"   - {g.name} (id={g.id}, members={g.member_count})")
     init_db()
+    try:
+        if DISCORD_GUILD_ID:
+            guild = discord.Object(id=int(DISCORD_GUILD_ID))
+            bot.tree.copy_global_to(guild=guild)
+            synced = await bot.tree.sync(guild=guild)
+            print(f"✅ 已同步 {len(synced)} 個 slash commands 到 guild {DISCORD_GUILD_ID}")
+        else:
+            synced = await bot.tree.sync()
+            print(f"✅ 已同步 {len(synced)} 個 global slash commands")
+        for cmd in synced:
+            print(f"   /{cmd.name}")
+    except Exception as e:
+        print(f"❌ 同步指令失敗: {e}")
+        import traceback
+        traceback.print_exc()
+
+    if not price_alert_check.is_running():
+        price_alert_check.start()
+
+
+# 手動強制同步（在 Discord 傳 "!sync" 觸發，限 owner）
+@bot.command(name="sync")
+async def manual_sync(ctx):
+    if OWNER_IDS and ctx.author.id not in OWNER_IDS:
+        return
     try:
         if DISCORD_GUILD_ID:
             guild = discord.Object(id=int(DISCORD_GUILD_ID))
@@ -52,12 +80,9 @@ async def on_ready():
             synced = await bot.tree.sync(guild=guild)
         else:
             synced = await bot.tree.sync()
-        print(f"✅ 已同步 {len(synced)} 個 slash commands")
+        await ctx.send(f"✅ 已同步 {len(synced)} 個指令")
     except Exception as e:
-        print(f"❌ 同步指令失敗: {e}")
-
-    if not price_alert_check.is_running():
-        price_alert_check.start()
+        await ctx.send(f"❌ 同步失敗: {e}")
 
 
 # ==================== 自選股指令 ====================
