@@ -4,13 +4,31 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from config import DISCORD_BOT_TOKEN, DISCORD_GUILD_ID
+from config import DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, get_owner_ids
 from models import init_db, get_session, Watchlist, PriceAlert
 from stock import get_stock_info, format_price_message
 
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
+
+OWNER_IDS = get_owner_ids()
+
+
+async def _owner_check(interaction: discord.Interaction) -> bool:
+    """全域檢查：若設定 OWNER_IDS，則只有這些人可以使用"""
+    if not OWNER_IDS or interaction.user.id in OWNER_IDS:
+        return True
+    try:
+        await interaction.response.send_message(
+            "⛔ 你沒有權限使用這個 Bot", ephemeral=True
+        )
+    except Exception:
+        pass
+    return False
+
+
+bot.tree.interaction_check = _owner_check
 
 
 # ==================== 事件 ====================
