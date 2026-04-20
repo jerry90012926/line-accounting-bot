@@ -5,7 +5,12 @@
 - 警報推送 hook（Discord DM + LINE push）
 """
 import os
+import sys
 import threading
+
+# 關閉 stdout/stderr 緩衝，讓 Render log 即時顯示
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
 
 from flask import Flask, request, abort
 
