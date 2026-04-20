@@ -1,43 +1,88 @@
-"""台股資料抓取（使用 yfinance）"""
+"""台股資料抓取（雙來源：證交所 + yfinance 備援）"""
+import requests
 import yfinance as yf
 
-
-def _to_yf_symbol(symbol):
-    """
-    將台股代號轉為 yfinance 格式。
-    2330 -> 2330.TW（上市）
-    6488 -> 6488.TWO（上櫃，若 .TW 失敗會自動嘗試）
-    """
-    symbol = symbol.strip().upper()
-    if "." in symbol:
-        return symbol
-    return f"{symbol}.TW"
+# 台灣證交所即時行情 API（盤中/盤後都能用）
+TWSE_URL = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp"
 
 
-def get_stock_info(symbol):
-    """
-    取得股票即時資訊，回傳 dict 或 None。
-    """
-    candidates = [f"{symbol}.TW", f"{symbol}.TWO"] if "." not in symbol else [symbol]
-
-    for yf_symbol in candidates:
+def _fetch_twse(symbol: str):
+    """從證交所 API 抓上市/上櫃即時報價"""
+    for prefix in ("tse_", "otc_"):
         try:
-            ticker = yf.Ticker(yf_symbol)
-            # 取最近兩天的資料來算漲跌
+            params = {
+                "ex_ch": f"{prefix}{symbol}.tw",
+                "json": "1",
+                "delay": "0",
+            }
+            headers = {
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+                ),
+                "Referer": "https://mis.twse.com.tw/stock/fibest.jsp",
+            }
+            r = requests.get(TWSE_URL, params=params, headers=headers, timeout=8)
+            r.raise_for_status()
+            data = r.json()
+            arr = data.get("msgArray", [])
+            if not arr:
+                continue
+            d = arr[0]
+
+            # z=最新成交價, y=昨收, o=開盤, h=最高, l=最低, v=成交量, n=名稱
+            def _f(key):
+                v = d.get(key, "")
+                if not v or v == "-":
+                    return None
+                try:
+                    return float(v)
+                except ValueError:
+                    return None
+
+            price = _f("z") or _f("y")  # 盤前用昨收
+            if price is None:
+                continue
+            prev_close = _f("y") or price
+            change = price - prev_close
+            change_pct = (change / prev_close * 100) if prev_close else 0
+
+            return {
+                "symbol": symbol,
+                "name": d.get("n", symbol),
+                "price": price,
+                "open": _f("o") or price,
+                "high": _f("h") or price,
+                "low": _f("l") or price,
+                "volume": int(_f("v") or 0) * 1000,  # TWSE 單位為張
+                "prev_close": prev_close,
+                "change": change,
+                "change_pct": change_pct,
+                "currency": "TWD",
+                "source": "TWSE",
+            }
+        except Exception as e:
+            print(f"TWSE {prefix}{symbol} 失敗: {e}")
+            continue
+    return None
+
+
+def _fetch_yfinance(symbol: str):
+    """備援：yfinance"""
+    for suffix in (".TW", ".TWO"):
+        try:
+            ticker = yf.Ticker(f"{symbol}{suffix}")
             hist = ticker.history(period="5d")
             if hist.empty:
                 continue
-
             info = ticker.info
             latest = hist.iloc[-1]
             prev_close = hist.iloc[-2]["Close"] if len(hist) >= 2 else latest["Open"]
             current = float(latest["Close"])
             change = current - float(prev_close)
             change_pct = (change / float(prev_close)) * 100 if prev_close else 0
-
             return {
                 "symbol": symbol,
-                "yf_symbol": yf_symbol,
                 "name": info.get("longName") or info.get("shortName") or symbol,
                 "price": current,
                 "open": float(latest["Open"]),
@@ -47,31 +92,40 @@ def get_stock_info(symbol):
                 "prev_close": float(prev_close),
                 "change": change,
                 "change_pct": change_pct,
-                "currency": info.get("currency", "TWD"),
+                "currency": "TWD",
+                "source": "yfinance",
             }
-        except Exception:
+        except Exception as e:
+            print(f"yfinance {symbol}{suffix} 失敗: {e}")
             continue
-
     return None
 
 
+def get_stock_info(symbol: str):
+    """優先用證交所 API，失敗才用 yfinance"""
+    symbol = symbol.strip().upper().replace(".TW", "").replace(".TWO", "")
+    info = _fetch_twse(symbol)
+    if info:
+        return info
+    return _fetch_yfinance(symbol)
+
+
 def get_history(symbol, period="1mo"):
-    """取得歷史資料，用於圖表或趨勢分析"""
-    yf_symbol = _to_yf_symbol(symbol)
-    try:
-        ticker = yf.Ticker(yf_symbol)
-        hist = ticker.history(period=period)
-        if hist.empty:
-            # 嘗試上櫃
-            ticker = yf.Ticker(f"{symbol}.TWO")
+    """取得歷史資料（目前只用 yfinance）"""
+    symbol = symbol.strip().upper()
+    for suffix in (".TW", ".TWO"):
+        try:
+            ticker = yf.Ticker(f"{symbol}{suffix}")
             hist = ticker.history(period=period)
-        return hist if not hist.empty else None
-    except Exception:
-        return None
+            if not hist.empty:
+                return hist
+        except Exception:
+            continue
+    return None
 
 
 def format_price_message(info):
-    """將股票資訊格式化成易讀文字"""
+    """將股票資訊格式化"""
     if not info:
         return "❌ 找不到這支股票"
 
