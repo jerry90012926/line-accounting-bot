@@ -4,7 +4,9 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from config import DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, get_owner_ids
+from config import (
+    DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, OWNER_KEY, get_discord_owner_ids
+)
 from models import init_db, get_session, Watchlist, PriceAlert
 from stock import get_stock_info, format_price_message
 
@@ -12,11 +14,18 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-OWNER_IDS = get_owner_ids()
+OWNER_IDS = get_discord_owner_ids()
+
+# 警報觸發時，用 hook 通知其他平台（例如 LINE）
+# 每個 hook 是一個 async callable，接受 (symbol, info, direction, target_price)
+_alert_push_hooks = []
+
+
+def register_alert_hook(fn):
+    _alert_push_hooks.append(fn)
 
 
 async def _owner_check(interaction: discord.Interaction) -> bool:
-    """全域檢查：若設定 OWNER_IDS，則只有這些人可以使用"""
     if not OWNER_IDS or interaction.user.id in OWNER_IDS:
         return True
     try:
@@ -34,7 +43,7 @@ bot.tree.interaction_check = _owner_check
 # ==================== 事件 ====================
 @bot.event
 async def on_ready():
-    print(f"✅ Bot 已登入: {bot.user} (id={bot.user.id})")
+    print(f"✅ Discord Bot 已登入: {bot.user} (id={bot.user.id})")
     init_db()
     try:
         if DISCORD_GUILD_ID:
@@ -47,7 +56,6 @@ async def on_ready():
     except Exception as e:
         print(f"❌ 同步指令失敗: {e}")
 
-    # 啟動價格警報檢查
     if not price_alert_check.is_running():
         price_alert_check.start()
 
@@ -59,7 +67,6 @@ async def add_stock(interaction: discord.Interaction, symbol: str, note: str = "
     await interaction.response.defer()
     symbol = symbol.strip().upper()
 
-    # 驗證股票存在
     info = get_stock_info(symbol)
     if not info:
         await interaction.followup.send(f"❌ 找不到股票 `{symbol}`")
@@ -68,26 +75,20 @@ async def add_stock(interaction: discord.Interaction, symbol: str, note: str = "
     session = get_session()
     try:
         existing = session.query(Watchlist).filter_by(
-            user_id=str(interaction.user.id), symbol=symbol
+            user_id=OWNER_KEY, symbol=symbol
         ).first()
         if existing:
-            await interaction.followup.send(f"⚠️ `{symbol} {info['name']}` 已經在你的自選股中")
+            await interaction.followup.send(f"⚠️ `{symbol} {info['name']}` 已在自選股中")
             return
 
-        item = Watchlist(
-            user_id=str(interaction.user.id),
-            symbol=symbol,
-            name=info["name"],
-            note=note,
-        )
+        item = Watchlist(user_id=OWNER_KEY, symbol=symbol, name=info["name"], note=note)
         session.add(item)
         session.commit()
     finally:
         session.close()
 
     await interaction.followup.send(
-        f"✅ 已加入自選股：**{info['name']}** ({symbol})\n"
-        f"目前價格：${info['price']:.2f}"
+        f"✅ 已加入自選股：**{info['name']}** ({symbol})\n目前價格：${info['price']:.2f}"
     )
 
 
@@ -97,11 +98,9 @@ async def remove_stock(interaction: discord.Interaction, symbol: str):
     symbol = symbol.strip().upper()
     session = get_session()
     try:
-        item = session.query(Watchlist).filter_by(
-            user_id=str(interaction.user.id), symbol=symbol
-        ).first()
+        item = session.query(Watchlist).filter_by(user_id=OWNER_KEY, symbol=symbol).first()
         if not item:
-            await interaction.response.send_message(f"❌ `{symbol}` 不在你的自選股中")
+            await interaction.response.send_message(f"❌ `{symbol}` 不在自選股中")
             return
         name = item.name
         session.delete(item)
@@ -117,22 +116,15 @@ async def list_stocks(interaction: discord.Interaction):
     await interaction.response.defer()
     session = get_session()
     try:
-        items = session.query(Watchlist).filter_by(
-            user_id=str(interaction.user.id)
-        ).order_by(Watchlist.created_at).all()
+        items = session.query(Watchlist).filter_by(user_id=OWNER_KEY).order_by(Watchlist.created_at).all()
     finally:
         session.close()
 
     if not items:
-        await interaction.followup.send(
-            "📭 你還沒有自選股\n用 `/add <股票代號>` 來新增"
-        )
+        await interaction.followup.send("📭 還沒有自選股\n用 `/add <股票代號>` 來新增")
         return
 
-    embed = discord.Embed(
-        title="📋 你的自選股清單",
-        color=0x3498db,
-    )
+    embed = discord.Embed(title="📋 自選股清單", color=0x3498db)
     for item in items:
         value = f"ID: `{item.symbol}`"
         if item.note:
@@ -153,7 +145,6 @@ async def price(interaction: discord.Interaction, symbol: str):
     if not info:
         await interaction.followup.send(f"❌ 找不到股票 `{symbol}`")
         return
-
     await interaction.followup.send(format_price_message(info))
 
 
@@ -162,16 +153,12 @@ async def watch(interaction: discord.Interaction):
     await interaction.response.defer()
     session = get_session()
     try:
-        items = session.query(Watchlist).filter_by(
-            user_id=str(interaction.user.id)
-        ).all()
+        items = session.query(Watchlist).filter_by(user_id=OWNER_KEY).all()
     finally:
         session.close()
 
     if not items:
-        await interaction.followup.send(
-            "📭 你還沒有自選股\n用 `/add <股票代號>` 來新增"
-        )
+        await interaction.followup.send("📭 還沒有自選股\n用 `/add <股票代號>` 來新增")
         return
 
     embed = discord.Embed(title="📊 自選股即時行情", color=0x2ecc71)
@@ -180,7 +167,6 @@ async def watch(interaction: discord.Interaction):
     tasks_list = [loop.run_in_executor(None, get_stock_info, item.symbol) for item in items]
     results = await asyncio.gather(*tasks_list)
 
-    total_items = 0
     for item, info in zip(items, results):
         if not info:
             embed.add_field(
@@ -189,32 +175,21 @@ async def watch(interaction: discord.Interaction):
                 inline=False,
             )
             continue
-
         arrow = "🔺" if info["change"] > 0 else ("🔻" if info["change"] < 0 else "▫️")
         sign = "+" if info["change"] > 0 else ""
-
         embed.add_field(
             name=f"{info['name']} ({item.symbol})",
-            value=(
-                f"💰 ${info['price']:.2f} "
-                f"{arrow} {sign}{info['change']:.2f} "
-                f"({sign}{info['change_pct']:.2f}%)"
-            ),
+            value=f"💰 ${info['price']:.2f} {arrow} {sign}{info['change']:.2f} ({sign}{info['change_pct']:.2f}%)",
             inline=False,
         )
-        total_items += 1
 
-    embed.set_footer(text=f"共 {total_items} 支")
+    embed.set_footer(text=f"共 {len(items)} 支")
     await interaction.followup.send(embed=embed)
 
 
 # ==================== 價格警報 ====================
 @bot.tree.command(name="alert", description="設定價格警報")
-@app_commands.describe(
-    symbol="股票代號",
-    direction="方向（above=突破上漲 / below=跌破下跌）",
-    price="目標價格",
-)
+@app_commands.describe(symbol="股票代號", direction="突破或跌破", price="目標價格")
 @app_commands.choices(direction=[
     app_commands.Choice(name="突破（高於）", value="above"),
     app_commands.Choice(name="跌破（低於）", value="below"),
@@ -234,7 +209,7 @@ async def alert(
     session = get_session()
     try:
         item = PriceAlert(
-            user_id=str(interaction.user.id),
+            user_id=OWNER_KEY,
             symbol=symbol,
             direction=direction.value,
             target_price=price,
@@ -247,8 +222,7 @@ async def alert(
 
     dir_text = "突破" if direction.value == "above" else "跌破"
     await interaction.response.send_message(
-        f"⏰ 警報已設定 #{alert_id}\n"
-        f"**{info['name']}** ({symbol}) {dir_text} ${price:.2f} 時會通知你"
+        f"⏰ 警報已設定 #{alert_id}\n**{info['name']}** ({symbol}) {dir_text} ${price:.2f}"
     )
 
 
@@ -256,9 +230,7 @@ async def alert(
 async def list_alerts(interaction: discord.Interaction):
     session = get_session()
     try:
-        items = session.query(PriceAlert).filter_by(
-            user_id=str(interaction.user.id), triggered=0
-        ).all()
+        items = session.query(PriceAlert).filter_by(user_id=OWNER_KEY, triggered=0).all()
     finally:
         session.close()
 
@@ -266,12 +238,11 @@ async def list_alerts(interaction: discord.Interaction):
         await interaction.response.send_message("📭 沒有未觸發的警報")
         return
 
-    text = "⏰ **你的價格警報**\n"
+    text = "⏰ **價格警報清單**\n"
     for a in items:
         dir_text = "🔺 突破" if a.direction == "above" else "🔻 跌破"
         text += f"  #{a.id} {a.symbol} {dir_text} ${a.target_price:.2f}\n"
     text += "\n用 `/alert_remove <編號>` 移除警報"
-
     await interaction.response.send_message(text)
 
 
@@ -280,9 +251,7 @@ async def list_alerts(interaction: discord.Interaction):
 async def alert_remove(interaction: discord.Interaction, alert_id: int):
     session = get_session()
     try:
-        item = session.query(PriceAlert).filter_by(
-            id=alert_id, user_id=str(interaction.user.id)
-        ).first()
+        item = session.query(PriceAlert).filter_by(id=alert_id, user_id=OWNER_KEY).first()
         if not item:
             await interaction.response.send_message(f"❌ 找不到警報 #{alert_id}")
             return
@@ -290,58 +259,41 @@ async def alert_remove(interaction: discord.Interaction, alert_id: int):
         session.commit()
     finally:
         session.close()
-
     await interaction.response.send_message(f"🗑️ 已移除警報 #{alert_id}")
 
 
-# ==================== 說明 ====================
 @bot.tree.command(name="help", description="查看使用說明")
 async def help_command(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="📖 台股自選股 Bot 指令說明",
-        color=0x9b59b6,
-    )
+    embed = discord.Embed(title="📖 台股自選股 Bot 指令說明", color=0x9b59b6)
     embed.add_field(
         name="📋 自選股管理",
-        value=(
-            "`/add <代號> [備註]` — 加入自選股\n"
-            "`/remove <代號>` — 移除自選股\n"
-            "`/list` — 查看自選股清單"
-        ),
+        value="`/add <代號> [備註]` — 加入自選股\n`/remove <代號>` — 移除自選股\n`/list` — 查看清單",
         inline=False,
     )
     embed.add_field(
         name="💰 查價",
-        value=(
-            "`/price <代號>` — 查單支股票\n"
-            "`/watch` — 查看所有自選股即時行情"
-        ),
+        value="`/price <代號>` — 查單支股票\n`/watch` — 所有自選股即時行情",
         inline=False,
     )
     embed.add_field(
         name="⏰ 價格警報",
-        value=(
-            "`/alert <代號> <方向> <價格>` — 設定警報\n"
-            "`/alerts` — 查看所有警報\n"
-            "`/alert_remove <編號>` — 移除警報"
-        ),
+        value="`/alert <代號> <方向> <價格>` — 設定警報\n`/alerts` — 查看警報\n`/alert_remove <編號>` — 移除警報",
         inline=False,
     )
-    embed.set_footer(text="資料來源：Yahoo Finance")
+    embed.set_footer(text="資料來源：Yahoo Finance · 警報同步推送到 LINE")
     await interaction.response.send_message(embed=embed)
 
 
 # ==================== 價格警報定時檢查 ====================
 @tasks.loop(minutes=5)
 async def price_alert_check():
-    """每 5 分鐘檢查一次價格警報"""
+    """每 5 分鐘檢查一次價格警報，觸發時推送到 Discord DM + LINE"""
     session = get_session()
     try:
         alerts = session.query(PriceAlert).filter_by(triggered=0).all()
         if not alerts:
             return
 
-        # 以 symbol 分組避免重複查詢
         symbols = {a.symbol for a in alerts}
         loop = asyncio.get_event_loop()
         price_map = {}
@@ -360,18 +312,29 @@ async def price_alert_check():
             if not hit:
                 continue
 
-            # 觸發警報 — 發 DM 給使用者
-            try:
-                user = await bot.fetch_user(int(a.user_id))
-                dir_text = "突破" if a.direction == "above" else "跌破"
-                await user.send(
-                    f"🚨 **價格警報觸發！**\n"
-                    f"**{info['name']}** ({a.symbol}) 已{dir_text}目標價 ${a.target_price:.2f}\n"
-                    f"目前價格：${current:.2f}"
-                )
-                a.triggered = 1
-            except Exception as e:
-                print(f"發送警報失敗: {e}")
+            dir_text = "突破" if a.direction == "above" else "跌破"
+            msg = (
+                f"🚨 價格警報觸發！\n"
+                f"{info['name']} ({a.symbol}) 已{dir_text}目標價 ${a.target_price:.2f}\n"
+                f"目前價格：${current:.2f}"
+            )
+
+            # Discord DM 給所有 owner
+            for owner_id in OWNER_IDS:
+                try:
+                    user = await bot.fetch_user(owner_id)
+                    await user.send(msg)
+                except Exception as e:
+                    print(f"Discord 推送失敗 ({owner_id}): {e}")
+
+            # 呼叫所有註冊的 hooks（例如 LINE 推播）
+            for hook in _alert_push_hooks:
+                try:
+                    await hook(a.symbol, info, a.direction, a.target_price)
+                except Exception as e:
+                    print(f"Alert hook 推送失敗: {e}")
+
+            a.triggered = 1
 
         session.commit()
     finally:

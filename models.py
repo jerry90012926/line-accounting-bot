@@ -9,14 +9,14 @@ Base = declarative_base()
 
 
 class Watchlist(Base):
-    """使用者自選股"""
+    """使用者自選股（Discord/LINE 共用）"""
     __tablename__ = "watchlist"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(String, nullable=False, index=True)
-    symbol = Column(String, nullable=False)  # 台股代號，如 "2330"
-    name = Column(String, default="")         # 公司名稱快取
-    note = Column(String, default="")         # 使用者備註
+    user_id = Column(String, nullable=False, index=True)  # 統一的 owner key
+    symbol = Column(String, nullable=False)
+    name = Column(String, default="")
+    note = Column(String, default="")
     created_at = Column(DateTime, default=datetime.now)
 
     __table_args__ = (
@@ -33,7 +33,7 @@ class PriceAlert(Base):
     symbol = Column(String, nullable=False)
     direction = Column(String, nullable=False)  # "above" / "below"
     target_price = Column(Float, nullable=False)
-    triggered = Column(Integer, default=0)  # 0 = 未觸發, 1 = 已觸發
+    triggered = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.now)
 
 

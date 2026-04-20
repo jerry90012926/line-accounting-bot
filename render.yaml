@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: discord-stock-bot
+    name: stock-bot
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: python app.py
@@ -9,3 +9,13 @@ services:
         sync: false
       - key: DISCORD_GUILD_ID
         sync: false
+      - key: DISCORD_OWNER_IDS
+        sync: false
+      - key: LINE_CHANNEL_SECRET
+        sync: false
+      - key: LINE_CHANNEL_ACCESS_TOKEN
+        sync: false
+      - key: LINE_OWNER_USER_IDS
+        sync: false
+      - key: OWNER_KEY
+        value: default_owner
